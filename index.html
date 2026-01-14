@@ -247,6 +247,12 @@
               <div class="text-3xl font-bold" id="change-primary" style="color:#fff">0.00 лв</div>
               <div class="text-sm" id="change-secondary" style="color:var(--muted)">≈ 0.00 €</div>
             </div>
+
+            <!-- Download button (показва се когато има резултат) -->
+            <div class="flex justify-end mt-3">
+              <button id="downloadBtn" class="px-3 py-2 rounded-md" style="border:1px solid rgba(255,255,255,0.03);background:transparent;color:var(--muted);font-weight:700;display:none" aria-label="Изтегли бележка">Свали бележка</button>
+            </div>
+
           </div>
         </div>
 
@@ -273,8 +279,10 @@
     const showBgnBtn = document.getElementById('show-bgn');
     const showEurBtn = document.getElementById('show-eur');
     const installBtn = document.getElementById('installBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
 
     let displayCurrency = 'BGN';
+    let lastComputed = null; // ще съдържа последните изчислени стойности
 
     // Форматиране
     const fmtBGN = (v) => {
@@ -308,6 +316,7 @@
         // Няма въведена сума за плащане — скрий резултата и грешките
         hideError();
         hideResult();
+        lastComputed = null;
         return;
       }
 
@@ -315,9 +324,13 @@
         // недостатъчна сума
         showError(requiredBGN - totalPaidBGN);
         hideResult();
+        lastComputed = {
+          amount, amountCur, paidBGN, paidEUR, requiredBGN, totalPaidBGN, changeBGN: 0, timestamp: new Date().toISOString()
+        };
       } else {
         hideError();
         const changeBGN = Math.max(0, diffBGN);
+        lastComputed = { amount, amountCur, paidBGN, paidEUR, requiredBGN, totalPaidBGN, changeBGN, timestamp: new Date().toISOString() };
         showResult(changeBGN);
       }
     }
@@ -330,6 +343,8 @@
       box.textContent = 'Недостатъчна сума — липсват ' + fmtBGN(missingBGN);
       errorEl.appendChild(box);
       resultCard.classList.remove('visible');
+      // скриваме бутона за сваляне при грешка
+      downloadBtn.style.display = 'none';
     }
 
     function hideError(){
@@ -347,10 +362,14 @@
         changeSecondary.textContent = '≈ ' + fmtBGN(changeBGN);
       }
       resultCard.classList.add('visible');
+      // Покажи бутона за сваляне
+      downloadBtn.style.display = 'inline-block';
     }
 
     function hideResult(){
       resultCard.classList.remove('visible');
+      // Скриваме бутона за сваляне
+      downloadBtn.style.display = 'none';
     }
 
     // Слушатели за полетата (реално време)
@@ -371,6 +390,57 @@
       showBgnBtn.classList.remove('active');
       compute();
     });
+
+    /* ---------- Download / Свали бележка ---------- */
+    function downloadReceipt() {
+      if (!lastComputed) return;
+
+      const dt = new Date(lastComputed.timestamp || Date.now());
+      const when = dt.toLocaleString('bg-BG');
+
+      const amountLine = lastComputed.amountCur === 'BGN'
+        ? `${fmtBGN(lastComputed.amount)}`
+        : `${fmtEUR(lastComputed.amount)}`;
+
+      const paidBGNLine = fmtBGN(lastComputed.paidBGN);
+      const paidEURLine = fmtEUR(lastComputed.paidEUR);
+      const totalPaidBGNLine = fmtBGN(lastComputed.totalPaidBGN);
+      const requiredBGNLine = fmtBGN(lastComputed.requiredBGN);
+      const changeBGNLine = fmtBGN(lastComputed.changeBGN);
+      const changeEURLine = fmtEUR(lastComputed.changeBGN / RATE);
+
+      const lines = [
+        'Ресто — бележка',
+        '======================',
+        `Дата: ${when}`,
+        '',
+        `Сума за плащане: ${amountLine}`,
+        `Платено: ${paidBGNLine} (лв) + ${paidEURLine} (€)`,
+        `Общо платено (BGN): ${totalPaidBGNLine}`,
+        `Изисквана (BGN): ${requiredBGNLine}`,
+        '',
+        `Ресто: ${changeBGNLine} ≈ ${changeEURLine}`,
+        '',
+        `Курс: 1 EUR = ${RATE} BGN`,
+        '----------------------',
+        'Генерирано от Ресто — BGN / EUR'
+      ];
+
+      const content = lines.join('\n');
+      const filename = `resto-${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}-${String(dt.getHours()).padStart(2,'0')}${String(dt.getMinutes()).padStart(2,'0')}${String(dt.getSeconds()).padStart(2,'0')}.txt`;
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    downloadBtn.addEventListener('click', downloadReceipt);
 
     /* ---------- Динамично генериране на manifest и икона (SVG) ---------- */
     function createInstallIconDataURL(size = 192, bg = '#6b7280', fg = '#ffffff') {
@@ -453,17 +523,17 @@
     // Символи (SVG) — строго тематични: монета, символ €, банкнота, receipt, портфейл, калкулатор
     const symbols = [
       // монета
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M12 9v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 12h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M12 9v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
       // символ евро
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 7C13.5 6 11.5 6 9.5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M15.5 17C13.5 18 11.5 18 9.5 18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M14 4.5C12 3.9 10.5 3.9 8.5 4.5V19.5C10.5 20.1 12 20.1 14 19.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15.5 7C13.5 6 11.5 6 9.5 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M15.5 17C13.5 18 11.5 18 9.5 18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
       // банкнота
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="6.5" width="19" height="11" rx="2" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="11.5" r="2" stroke="currentColor" stroke-width="1.2"/><path d="M7 16h10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="2.5" y="6.5" width="19" height="11" rx="2" stroke="currentColor" stroke-width="1.2"/><circle cx="12" cy="12" r="2" stroke="currentColor" stroke-width="1.2"/></svg>`,
       // касова бележка / receipt
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 2h9l3 3v15l-3-2-3 2-3-2-3 2V2z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 9h8" stroke="currentColor" stroke-width="1.1"/><path d="M8 12h6" stroke="currentColor" stroke-width="1.1"/></svg>`,
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 2h9l3 3v15l-3-2-3 2-3-2-3 2V2z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>`,
       // портфейл
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M16 9h1a1 1 0 010 2h-1" stroke="currentColor" stroke-width="1.2"/></svg>`,
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M16 10h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`,
       // калкулатор
-      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="2" width="14" height="20" rx="2" stroke="currentColor" stroke-width="1.1"/><rect x="9" y="7" width="6" height="3" rx="0.6" fill="currentColor"/><path d="M8 13h1M11 13h1M14 13h1M8 16h1M11 16h1M14 16h1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`
+      `<svg viewBox="0 0 24 24" width="42" height="42" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="2" width="14" height="20" rx="2" stroke="currentColor" stroke-width="1.1"/><rect x="8" y="6" width="8" height="3" rx="0.5" stroke="currentColor" stroke-width="1.1"/></svg>`
     ];
 
     // Генерираме мрежа от клетки и ги попълваме строго в цикличен ред
@@ -534,12 +604,12 @@
 
     /* ---------- Accessibility / shortcuts ---------- */
     // Направяме бутоните по-достъпни за клавиатура
-    [showBgnBtn, showEurBtn, installBtn].forEach(b => {
+    [showBgnBtn, showEurBtn, installBtn, downloadBtn].forEach(b => {
       b.setAttribute('tabindex', '0');
     });
 
     /* ---------- Показване на икона/manifest е готово ---------- */
-    // Малка финална инициализация: скриваме бутона за инсталиране по подразбиране (ще се покаже при beforeinstallprompt)
+    // Малка финална инициализация: скривам�� бутона за инсталиране по подразбиране (ще се покаже при beforeinstallprompt)
     installBtn.style.display = 'none';
 
     // Ако браузърът не поддържа beforeinstallprompt, показваме съвет за iOS
